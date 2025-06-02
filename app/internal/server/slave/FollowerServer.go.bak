@@ -1,0 +1,242 @@
+package slave
+
+import (
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"reflect"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/codecrafters-io/redis-starter-go/app/internal/config"
+	rfmt "github.com/codecrafters-io/redis-starter-go/app/internal/protocol"
+	"github.com/codecrafters-io/redis-starter-go/app/internal/storage/memory/kvstore"
+	filemanager "github.com/codecrafters-io/redis-starter-go/app/internal/storage/rdb"
+)
+
+// var (
+// 	kvMapFS sync.Map
+// )
+
+var (
+	// 缺省参数
+
+	ifSecTime     = false
+	firReplId     = "?"
+	firReplOffset = "-1"
+
+	master_repl_offset = "0"
+	master_replid      = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
+)
+
+type FollowerServer struct {
+	Cfg   *config.ServerConfig
+	Store *kvstore.Store
+}
+
+func (s *FollowerServer) Start() error {
+	// 连接到主节点
+	d, err := net.Dial("tcp", s.Cfg.ReplicaOf.MasterHost+":"+s.Cfg.ReplicaOf.MasterPort)
+	if err != nil {
+		log.Printf("Failed to dial port %s : %s", s.Cfg.Port, err)
+		return err
+	}
+	// 方法中的goroutine使用结构体元素 可能会产生竞态 检测：go test -race
+	// 解决 ：显式捕获当前值 并传入闭包
+	go s.HandleConn(d)
+	// Listen启动服务监听
+	l, err := net.Listen("tcp", "0.0.0.0:"+s.Cfg.Port)
+	if err != nil {
+		log.Printf("Failed to bind to port %s : %s", s.Cfg.Port, err)
+		return err
+	}
+	go s.HandleCmd(l)
+	return nil
+}
+
+func (s *FollowerServer) HandleConn(d net.Conn) error {
+	defer d.Close()
+	// STEP I
+	d.Write(rfmt.ArrayFmt([]string{"PING"}))
+	for {
+		buf := make([]byte, 1024)
+		length, err := d.Read(buf)
+		if err != nil {
+			log.Printf("Buf read Error: %#v\n", err)
+			if err == io.EOF {
+				log.Println("slave : master closed conn")
+				return err
+			}
+			continue
+		}
+		rawdata := string(buf[:length])
+		res := strings.Split(rawdata, "\r\n")
+		// 消息处理
+		// 处理 simpleString
+		if strings.HasPrefix(res[0], "+") {
+			// 处理 simple string
+			str := res[0][1:]
+			// 接收Master 的OK（ simpleString ）回应
+			if strings.EqualFold(str, "PONG") == true {
+				// STEP II
+				d.Write(rfmt.ArrayFmt([]string{
+					"REPLCONF",
+					"listening-port",
+					s.Cfg.Port,
+				}))
+			} else if strings.EqualFold(str, "OK") == true {
+				if ifSecTime {
+					d.Write(rfmt.ArrayFmt([]string{
+						"PSYNC",
+						firReplId,
+						firReplOffset,
+					}))
+					continue
+				}
+				// STEP III
+				d.Write(rfmt.ArrayFmt([]string{
+					"REPLCONF",
+					"capa",
+					"psync2",
+				}))
+				ifSecTime = true
+			}
+		} else if strings.HasPrefix(res[0], "*") {
+			// 处理array  master传来的 “write” 命令
+			// 获取传入字段切片长度
+			elem_Len, err := strconv.Atoi(res[0][1:])
+			if err != nil {
+				log.Printf("elem_Len Read Error: %s", err)
+				return err
+			}
+			if strings.EqualFold(res[1*2], "SET") == true {
+				// SET 命令
+				log.Printf("FS HandleConn Received SET, setting %s to %s", res[2*2], res[3*2])
+				if elem_Len > 3 && strings.EqualFold(res[4*2], "PX") == true {
+					// SET... PX... 命令
+					// 获取设定的过期时间
+					exTime, _ := strconv.Atoi(res[5*2])
+					// WIP: 俩Map的操作封装
+					s.Store.SetWithExpire(res[2*2], res[3*2], time.Duration(exTime)*time.Millisecond)
+					_ = filemanager.UpdateRDB(s.Fn, s.Store)
+
+					go filemanager.Expiry(exTime, s.Store, res[2*2], s.Fn)
+				} else {
+					// 只有SET
+					s.Store.Set(res[2*2], res[3*2])
+					log.Printf("kvMapFS Set %s to %s without PX", res[2*2], res[3*2])
+					go filemanager.UpdateRDB(s.Fn, s.Store)
+				}
+				d.Write([]byte("+OK\r\n"))
+			}
+		}
+	}
+}
+
+func (s *FollowerServer) HandleCmd(l net.Listener) error {
+	defer l.Close()
+	fmt.Println("Logs from your program will appear here!")
+
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			fmt.Println("Error accepting connection: ", err.Error())
+			return err
+		}
+		go func(conn net.Conn) {
+			defer conn.Close()
+			for {
+				buf := make([]byte, 1024)
+				length, err := conn.Read(buf)
+				if err != nil {
+					fmt.Printf("Buf read Error: %#v\n", err)
+					return
+				}
+				rawdata := string(buf[:length])
+				res := strings.Split(rawdata, "\r\n")
+				if strings.HasPrefix(res[0], "*") {
+					// 获取传入字段切片长度
+					_, err := strconv.Atoi(res[0][1:])
+					if err != nil {
+						return
+					}
+					// ECHO 命令
+					if strings.EqualFold(res[1*2], "ECHO") == true {
+						// 接受处理ECHO
+						log.Printf("FS HConn Received ECHO, Output:%s", res[2*2])
+						conn.Write(rfmt.SimpleStringFmt(res[2*2]))
+					} else if strings.EqualFold(res[1*2], "GET") == true {
+						// GET <key> 命令
+						// 从kvMap读取
+						if len(s.Store.Data) == 0 {
+							log.Printf("Data Array is empty , now GET %s from RDBFile", res[2*2])
+							kv, err := filemanager.GetRDBkeys(s.Fn)
+							if err != nil {
+								log.Printf("FS HandleCmd `GET` GetRDBkeys func Wrong: %s", err)
+								return
+							}
+							found := false
+							for i := 0; i < len(kv); i += 2 {
+								if kv[i] == res[2*2] {
+									log.Printf("GET bulkStringFmt: %s", kv[i+1])
+									conn.Write(rfmt.BulkStringFmt(kv[i+1]))
+									found = true
+									break
+								}
+							}
+							// 没有对应key
+							if !found {
+								conn.Write([]byte("$-1\r\n"))
+							}
+						} else {
+							log.Printf("FS HandleCmd Received GET, getting %s from kvMap", res[2*2])
+							OP, ok := s.Store.Get(res[2*2])
+							if !ok {
+								log.Printf("ERROR GET: %s from s.Store : not found", res[2*2])
+								conn.Write([]byte("$-1\r\n"))
+							} else {
+								// OP从Map中获取类型是any，需要类型断言
+								conn.Write(rfmt.SimpleStringFmt(OP))
+							}
+						}
+					} else if strings.EqualFold(res[1*2], "CONFIG") == true && strings.EqualFold(res[2*2], "GET") == true {
+						// CONFIG GET 命令
+						getName := res[3*2]
+						// 反射获取结构体字段 即配置
+						val := reflect.ValueOf(s.Cfg).Elem().FieldByName(getName)
+						getvalue := val.String()
+						conn.Write(rfmt.ArrayFmt([]string{getName, getvalue}))
+					} else if strings.EqualFold(res[1*2], "KEYS") == true {
+						// KEYS 命令
+						// 模式*  格式化返回 KVs
+						if strings.EqualFold(res[2*2], "*") == true {
+							kv, err := filemanager.GetRDBkeys(s.Fn)
+							// kv, err := filemanager.TmpParseKV(fn)
+							// filemanager.ShowFile(fn)
+							if err != nil {
+								log.Printf("FS HandleCmd `KEYS` GetRDBkeys func Wrong: %s", err)
+								return
+							}
+							// 只输出KEY 偶数位
+							var kvs []string
+							for i := 0; i < len(kv); i += 2 {
+								kvs = append(kvs, kv[i])
+								log.Printf("KEYS arrayFmt: %s", kv[i])
+							}
+							conn.Write(rfmt.ArrayFmt(kvs))
+						}
+					} else if strings.EqualFold(res[1*2], "PING") == true {
+						// PING 命令
+						log.Printf("Received PING")
+						conn.Write(rfmt.SimpleStringFmt("PONG"))
+					} else if strings.EqualFold(res[1*2], "INFO") == true {
+						// INFO 命令
+						conn.Write(rfmt.BulkStringFmt("role:slave"))
+					}
+				}
+			}
+		}(conn)
+	}
+}

@@ -1,0 +1,258 @@
+package master
+
+import (
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"os"
+	"reflect"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/codecrafters-io/redis-starter-go/app/internal/command"
+	"github.com/codecrafters-io/redis-starter-go/app/internal/config"
+	rfmt "github.com/codecrafters-io/redis-starter-go/app/internal/protocol"
+	"github.com/codecrafters-io/redis-starter-go/app/internal/storage/memory/kvstore"
+	filemanager "github.com/codecrafters-io/redis-starter-go/app/internal/storage/rdb"
+)
+
+type LeaderServer struct {
+	Cfg          *config.ServerConfig
+	ReplConnPool map[int]net.Conn
+	// cliConnPool 	map[string]net.Conn
+	Store    kvstore.Store
+	registry *command.Registry
+
+	Mu sync.Mutex
+}
+
+func (s *LeaderServer) Start() error {
+	l, err := net.Listen("tcp", "0.0.0.0:"+s.Cfg.Port)
+	if err != nil {
+		log.Printf("Failed to bind to port %s : %s", s.Cfg.Port, err)
+		return err
+	}
+	s.HandleCmd(l)
+	return nil
+}
+
+// HandleCmd listens for incoming connections and handles the Redis protocol.
+// It processes the ECHO, SET, GET, CONFIG, KEYS, PING, INFO, REPLCONF, and PSYNC
+// commands and sends the appropriate responses.
+func (s *LeaderServer) HandleCmd(l net.Listener) error {
+	//
+	defer l.Close()
+	// var kvMap, pxMap map[string]string
+	fn := s.Cfg.Dir + "/" + s.Cfg.Dbfilename
+	fmt.Println("Logs from your program will appear here!")
+
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			fmt.Println("Error accepting connection: ", err.Error())
+			return err
+		}
+		go func(conn net.Conn) {
+			defer conn.Close()
+			for {
+				// Read per-connection
+				buf := make([]byte, 1024)
+				length, err := conn.Read(buf)
+				if err != nil {
+					log.Printf("Buf read Error: %#v\n", err)
+					if err == io.EOF {
+						log.Println("master : slave closed conn")
+						return
+					}
+					continue
+				}
+				rawdata := string(buf[:length])
+				res := strings.Split(rawdata, "\r\n")
+				if strings.HasPrefix(res[0], "*") {
+					// 获取传入字段切片长度
+					elem_Len, err := strconv.Atoi(res[0][1:])
+					if err != nil {
+						return
+					}
+					// ECHO 命令
+					if strings.EqualFold(res[1*2], "ECHO") == true {
+						// 接受处理ECHO
+						log.Printf("Received ECHO, Output:%s", res[2*2])
+						conn.Write(rfmt.SimpleStringFmt(res[2*2]))
+					} else if strings.EqualFold(res[1*2], "SET") == true {
+						// SET 命令
+						log.Printf("Received SET, setting %s to %s", res[2*2], res[3*2])
+						// Write 类型命令 转发到副本
+						if elem_Len > 3 && strings.EqualFold(res[4*2], "PX") == true {
+							// SET... PX... 命令
+							// 获取设定的过期时间
+							exTime, _ := strconv.Atoi(res[5*2])
+							// WIP: 俩Map的操作封装
+							// kvMap.Store(res[2*2], res[3*2])
+							// pxMap.Store(res[2*2], uint64(exTime))
+							s.Store.SetWithExpire(res[2*2], res[3*2], time.Duration(exTime)*time.Millisecond)
+							err = filemanager.UpdateRDB(fn, s.Store)
+
+							go filemanager.Expiry(exTime, s.Store, res[2*2], fn)
+						} else {
+							// 只有SET
+							s.Store.Set(res[2*2], res[3*2])
+							err = filemanager.UpdateRDB(fn, s.Store)
+						}
+						// replConnPool 为空
+						if len(s.ReplConnPool) != 0 {
+							log.Printf("len of Conn Pool = %d", len(s.ReplConnPool))
+							for _, c := range s.ReplConnPool {
+								// 可能会有竞态  循环与goroutine异步 可能在goroutine启动时已经进行了几次循环，所以闭包中取值尽量显式赋值
+								res := res
+								go func(c net.Conn) {
+									if _, err := c.Write(rfmt.ArrayFmt([]string{res[1*2], res[2*2], res[3*2]})); err != nil {
+										log.Printf("Set cmd Propogated Error:%s", err)
+										return
+									}
+								}(c)
+							}
+						} else {
+							log.Printf("replConnPool is nil")
+						}
+						conn.Write([]byte("+OK\r\n"))
+					} else if strings.EqualFold(res[1*2], "GET") == true {
+						// GET <key> 命令
+						// 通过 kvMap 的大小 ，判断是从文件读取 ，还是 从kvMap读取
+						if len(s.Store.Data) == 0 {
+							kv, err := filemanager.GetRDBkeys(fn)
+							if err != nil {
+								log.Printf("LS HandleCmd `GET` GetRDBkeys func Wrong: %s", err)
+								return
+							}
+							found := false
+							for i := 0; i < len(kv); i += 2 {
+								if kv[i] == res[2*2] {
+									log.Printf("GET bulkStringFmt: %s", kv[i+1])
+									conn.Write(rfmt.BulkStringFmt(kv[i+1]))
+									found = true
+									break
+								}
+							}
+							// 没有对应key
+							if !found {
+								conn.Write([]byte("$-1\r\n"))
+							}
+						} else {
+							log.Printf("LS HandleCmd Received GET, getting %s", res[2*2])
+							OP, ok := s.Store.Get(res[2*2])
+							if !ok {
+								log.Printf("ERROR GET: %s", res[2*2])
+								conn.Write([]byte("$-1\r\n"))
+							} else {
+								// OP从Map中获取类型是any，需要类型断言
+								conn.Write(rfmt.SimpleStringFmt(OP))
+							}
+						}
+					} else if strings.EqualFold(res[1*2], "CONFIG") == true && strings.EqualFold(res[2*2], "GET") == true {
+						// CONFIG GET 命令
+						getName := res[3*2]
+						// 反射获取结构体字段 即配置
+						val := reflect.ValueOf(s.Cfg).Elem().FieldByName(getName)
+						getvalue := val.String()
+						conn.Write(rfmt.ArrayFmt([]string{getName, getvalue}))
+					} else if strings.EqualFold(res[1*2], "KEYS") == true {
+						// KEYS 命令
+						// 模式*  格式化返回 KVs
+						if strings.EqualFold(res[2*2], "*") == true {
+							kv, err := filemanager.GetRDBkeys(fn)
+							// kv, err := filemanager.TmpParseKV(fn)
+							// filemanager.ShowFile(fn)
+							if err != nil {
+								log.Printf("LS HandleCmd `KEYS` GetRDBkeys func Wrong: %s", err)
+								return
+							}
+							// 只输出KEY 偶数位
+							var kvs []string
+							for i := 0; i < len(kv); i += 2 {
+								kvs = append(kvs, kv[i])
+								log.Printf("KEYS arrayFmt: %s", kv[i])
+							}
+							conn.Write(rfmt.ArrayFmt(kvs))
+						}
+					} else if strings.EqualFold(res[1*2], "PING") == true {
+						// PING 命令
+						log.Printf("Received PING")
+						conn.Write(rfmt.SimpleStringFmt("PONG"))
+					} else if strings.EqualFold(res[1*2], "INFO") == true {
+						// INFO 命令
+						info := fmt.Sprintf("role:master\r\nmaster_repl_offset:%s\r\nmaster_replid:%s\r\n", master_repl_offset, master_replid)
+						conn.Write(rfmt.BulkStringFmt(info))
+					} else if strings.EqualFold(res[1*2], "REPLCONF") == true {
+						// WIP 功能待补充
+						if strings.EqualFold(res[2*2], "listening-port") == true {
+
+						}
+						conn.Write(rfmt.SimpleStringFmt("OK"))
+					} else if strings.EqualFold(res[1*2], "PSYNC") == true {
+						// 主从连接
+						s.Mu.Lock()
+						// conn.RemoteAddr().String()
+						s.ReplConnPool[len(s.ReplConnPool)+1] = conn // 添加
+						port := ""
+						addr, ok := conn.RemoteAddr().(*net.TCPAddr) // tcp地址解析
+						if ok {
+							port = strconv.Itoa(addr.Port)
+						}
+						log.Printf("replConnPool Port : %s", port)
+						s.Mu.Unlock()
+						// conn.Write(rfmt.SimpleStringFmt("FULLRESYNC" + " " + master_replid + " " + master_repl_offset))
+						// receive empty file , need full RESYNC assign empty new dile as RDB file
+						_ = ioCopyEmpty(fn, conn) // return empty file , discard return val
+					}
+				}
+			}
+		}(conn)
+	}
+}
+
+func ioCopyEmpty(fn string, conn net.Conn) error {
+	err := filemanager.SaveToRDB(fn, nil)
+	if err != nil {
+		log.Printf("Save Empty file Error: %s", err)
+		return err
+	}
+	file, err := os.Open(fn)
+	if err != nil {
+		log.Printf("Open File Error: %s", err)
+		return err
+	}
+	defer file.Close()
+	fileInfo, err := file.Stat()
+	fileSize := fileInfo.Size()
+	s := fmt.Sprintf("$%d\r\n", fileSize)
+	conn.Write([]byte(s))
+	_, err = io.Copy(conn, file) // avoid MemCopy
+	if err != nil {
+		log.Printf("ioCopy Error: %s", err)
+		return err
+	}
+	return nil
+}
+
+func (s *LeaderServer) PropagateToReplicas(args []string) error {
+	if len(s.ReplConnPool) != 0 {
+		log.Printf("len of Conn Pool = %d", len(s.ReplConnPool))
+		for _, c := range s.ReplConnPool {
+			// 可能会有竞态  循环与goroutine异步 可能在goroutine启动时已经进行了几次循环，所以闭包中取值尽量显式赋值
+			res := args
+			go func(c net.Conn) {
+				if _, err := c.Write(rfmt.ArrayFmt([]string{res[1*2], res[2*2], res[3*2]})); err != nil {
+					log.Printf("Set cmd Propogated Error:%s", err)
+					return
+				}
+			}(c)
+		}
+	} else {
+		log.Printf("replConnPool is nil")
+	}
+	return nil
+}

@@ -1,0 +1,90 @@
+// server/master/master.go
+package master
+
+import (
+    "context"
+    "log"
+    "net"
+    "sync"
+
+    "github.com/codecrafters-io/redis-starter-go/app/internal/command"
+    "github.com/codecrafters-io/redis-starter-go/app/internal/protocol"
+)
+
+type MasterServer struct {
+    cfg      *config.ServerConfig
+    store    storage.Store
+    registry *command.Registry
+    mu       sync.Mutex
+    slaves   map[net.Conn]struct{}
+}
+
+func NewMasterServer(cfg *config.ServerConfig) *MasterServer {
+    store := storage.NewStore()
+    registry := command.NewRegistry()
+    
+    // 注册命令
+    registry.Register(command.NewSetCommand(store))
+    registry.Register(command.NewGetCommand(store))
+    // 注册其他命令...
+    
+    return &MasterServer{
+        cfg:      cfg,
+        store:    store,
+        registry: registry,
+        slaves:   make(map[net.Conn]struct{}),
+    }
+}
+
+func (s *MasterServer) HandleConn(conn net.Conn) {
+    defer conn.Close()
+    reader := bufio.NewReader(conn)
+    
+    for {
+        // 解析请求
+        args, err := protocol.ParseRequest(reader)
+        if err != nil {
+            if err != io.EOF {
+                log.Printf("Error parsing request: %v", err)
+            }
+            return
+        }
+        
+        if len(args) == 0 {
+            continue
+        }
+        
+        // 获取命令处理器
+        cmdName := strings.ToUpper(args[0])
+        cmd, exists := s.registry.Get(cmdName)
+        if !exists {
+            conn.Write([]byte(protocol.Error("ERR unknown command '" + cmdName + "'")))
+            continue
+        }
+        
+        // 验证参数数量
+        if cmd.Arity() > 0 && len(args) != cmd.Arity() {
+            conn.Write([]byte(protocol.Error("ERR wrong number of arguments for '" + cmdName + "' command")))
+            continue
+        }
+        
+        // 执行命令
+        result, err := cmd.Execute(context.Background(), args[1:])
+        if err != nil {
+            conn.Write([]byte(protocol.Error("ERR " + err.Error())))
+            continue
+        }
+        
+        // 发送响应
+        conn.Write([]byte(protocol.SimpleString(result)))
+        
+        // 如果是写命令，传播到从节点
+        if isWriteCommand(cmdName) {
+            s.propagateToReplicas(args)
+        }
+    }
+}
+
+func (s *MasterServer) propagateToReplicas(args []string) {
+    // 实现命令传播逻辑
+}
