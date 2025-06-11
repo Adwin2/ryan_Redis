@@ -2,8 +2,30 @@
 
 [![Go](https://img.shields.io/badge/Go-1.20+-00ADD8?style=flat-square&logo=go)](https://golang.org/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Documentation](https://img.shields.io/badge/docs-configuration-brightgreen)](docs/configuration.md)
 
 一个使用 Go 语言实现的简化版 Redis 服务器，支持基础键值存储和主从复制功能。本项目旨在深入理解 Redis 的核心协议、网络通信模型以及数据持久化机制。
+
+## 📋 目录
+
+- [ryan\_Redis](#ryan_redis)
+  - [📋 目录](#-目录)
+  - [🚀 功能特性](#-功能特性)
+    - [核心功能](#核心功能)
+    - [技术亮点](#技术亮点)
+  - [📦 快速开始](#-快速开始)
+    - [环境要求](#环境要求)
+    - [安装与运行](#安装与运行)
+    - [使用示例](#使用示例)
+    - [项目结构](#项目结构)
+    - [📚 实现细节](#-实现细节)
+    - [配置说明](#配置说明)
+    - [配置文件](#配置文件)
+    - [配置优先级](#配置优先级)
+    - [详细配置说明](#详细配置说明)
+  - [🧪 测试](#-测试)
+    - [🤝 贡献](#-贡献)
+    - [📜 开源协议](#-开源协议)
 
 ## 🚀 功能特性
 
@@ -101,7 +123,30 @@ ryan_Redis/
 AOF 持久化
 支持 AOF 重写
 
-### 🧪 测试
+### 配置说明
+
+ryan_Redis 提供了灵活的配置方式，支持通过配置文件、环境变量和命令行参数进行配置。
+
+### 配置文件
+
+支持 YAML 格式的配置文件，默认查找路径：
+- 当前工作目录
+- `./configs/` 目录
+- `/etc/ryan_redis/` 目录
+- `$HOME/.config/ryan_redis/` 目录
+
+### 配置优先级
+
+1. 命令行参数
+2. 环境变量（以 `RR_` 为前缀）
+3. 配置文件
+4. 默认值
+
+### 详细配置说明
+
+请参阅 [配置文档](docs/configuration.md) 获取完整的配置项说明和示例。
+
+## 🧪 测试
 
 ```bash
 # 运行单元测试
@@ -117,4 +162,4 @@ go test -bench=. -benchmem
 
 ### 📜 开源协议
 
-本项目采用 MIT 许可证 - 详情请参阅 LICENSE 文件。
+本项目采用 MIT 许可证- 详情请参阅 [LICENSE](https://opensource.org/licenses/MIT) 文件。

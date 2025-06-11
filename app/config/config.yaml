@@ -1,0 +1,9 @@
+#dir: "/var/lib/rdb"      # 持久化数据存储目录
+dir: "/home/raymond/桌面/ryan_Redis/app/data"   # config.local.yaml
+dbfilename: "dump.rdb"    # 数据库文件名
+port: "6379"              # 服务端口
+role: "master"            # 角色：master/slave
+
+replicaof:
+  master_host: ""           # 主节点地址
+  master_port: ""           # 主节点端口

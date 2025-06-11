@@ -2,8 +2,23 @@
 
 package command
 
-import "github.com/codecrafters-io/redis-starter-go/app/internal/protocol"
+import (
+	"context"
 
-func ECHOExecute(rw protocol.ResponseWriter, args []string) error {
+	"github.com/codecrafters-io/redis-starter-go/app/internal/protocol"
+)
+
+type EchoCommand struct {
+}
+
+func NewEchoCommand() *EchoCommand {
+	return &EchoCommand{}
+}
+
+func (c *EchoCommand) Name() string {
+	return "ECHO"
+}
+
+func (c *EchoCommand) Execute(ctx context.Context, rw protocol.ResponseWriter, args []string) error {
 	return rw.WriteSimpleString(args[1])
 }

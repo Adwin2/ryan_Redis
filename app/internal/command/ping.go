@@ -1,8 +1,22 @@
-// PING命令默认支持 直接返回PONG字段
 package command
 
-import "github.com/codecrafters-io/redis-starter-go/app/internal/protocol"
+import (
+	"context"
 
-func PINGExecute(rw protocol.ResponseWriter, args []string) error {
+	"github.com/codecrafters-io/redis-starter-go/app/internal/protocol"
+)
+
+type PingCommand struct {
+}
+
+func NewPingCommand() *PingCommand {
+	return &PingCommand{}
+}
+
+func (c *PingCommand) Name() string {
+	return "PING"
+}
+
+func (c *PingCommand) Execute(ctx context.Context, rw protocol.ResponseWriter, args []string) error {
 	return rw.WriteSimpleString("PONG")
 }

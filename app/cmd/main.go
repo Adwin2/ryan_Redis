@@ -8,7 +8,10 @@ import (
 )
 
 func main() {
-	conf := config.ParseFlags()
+	conf, err := config.LoadConfig()
+	if err != nil {
+		log.Fatal(err)
+	}
 	server := svr.NewServer(conf)
 
 	if err := server.Start(); err != nil {

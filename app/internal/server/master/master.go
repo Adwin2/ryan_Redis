@@ -33,19 +33,22 @@ type MasterServer struct {
 type replicaInfo struct {
 	conn net.Conn
 	addr string
+	mu   sync.Mutex // 保护conn的并发访问
 }
 
 func NewMasterServer(cfg *config.ServerConfig) *MasterServer {
 	store := kvstore.NewStore()
 	ms := &MasterServer{
 		BaseServer: server.NewBaseServer(cfg, store),
-		Replicas:   make([]*replicaInfo, 100),
+		Replicas:   make([]*replicaInfo, 0), // 初始化为空
 	}
 	ms.RegisterCmd()
 	return ms
 }
 
 func (m *MasterServer) RegisterCmd() {
+	m.Registry.Register(command.NewPingCommand())
+	m.Registry.Register(command.NewEchoCommand())
 	// 注册命令
 	m.Registry.Register(command.NewSetCommand(m.Store, m.Cfg.Fn, m))
 	m.Registry.Register(command.NewGetCommand(m.Store, m.Cfg.Fn))
@@ -96,7 +99,7 @@ func (m *MasterServer) HandleConnection(conn net.Conn) {
 
 		// 处理命令
 		if err := m.ProcessCommand(rw, cmd, args); err != nil {
-			log.Printf("Command error: %v", err)
+			log.Printf("Command error: %v, cmd : %s", err, cmd)
 			return
 		}
 	}
@@ -122,22 +125,17 @@ func (m *MasterServer) AddReplica(conn net.Conn) {
 	m.Replicas = append(m.Replicas, info)
 
 	log.Printf("New replica connected: %s (Total: %d)", info.addr, len(m.Replicas))
-	// 先返回FULLRESYNC 再返回空RDB文件
-	// return empty file
-	// err := ioCopyEmpty(m.Cfg.Fn, info.conn)
-	// if err != nil {
-	// 	log.Printf("ioCopyEmpty Error: %s", err)
-	// 	return
-	// }
 
 	go m.syncToReplica(info)
 }
 
-// 删除副本
+// 删除副本   unused
 func (m *MasterServer) RemoveReplica(conn net.Conn) {
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
-
+	if m.Replicas == nil {
+		return
+	}
 	for i, r := range m.Replicas {
 		if r.conn == conn {
 			// 从切片中移除
@@ -182,15 +180,26 @@ func IoCopyEmpty(fn string, conn net.Conn) error {
 }
 
 func (m *MasterServer) PropagateToReplicas(args []string) error {
+	var wg sync.WaitGroup
 	m.Mu.RLock()
 	defer m.Mu.RUnlock()
 	if len(m.Replicas) != 0 {
 		log.Printf("Propagating command to %d replicas", len(m.Replicas))
-		for _, c := range m.Replicas {
+		for idx, c := range m.Replicas {
+			if c == nil {
+				log.Printf("Warning: nil replica found at index %d", idx)
+				continue
+			}
 			// 可能会有竞态  循环与goroutine异步 可能在goroutine启动时已经进行了几次循环，所以闭包中取值显式赋值
 			res := args
+			wg.Add(1)
 			go func(c *replicaInfo) {
-				if _, err := c.conn.Write(protocol.ArrayFmt(res)); err != nil {
+				defer wg.Done()
+				if c == nil || c.conn == nil {
+					log.Println("Warning: replica or replica.conn is nil")
+					return
+				}
+				if err := c.Write(res); err != nil {
 					log.Printf("Propogated Error %s :%s", res[0], err)
 					return
 				}
@@ -200,5 +209,16 @@ func (m *MasterServer) PropagateToReplicas(args []string) error {
 	} else {
 		log.Printf("replConnPool is nil")
 	}
+	wg.Wait()
 	return nil
+}
+
+func (r *replicaInfo) Write(args []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.conn == nil {
+		return fmt.Errorf("connection is closed")
+	}
+	_, err := r.conn.Write(protocol.ArrayFmt(args))
+	return err
 }

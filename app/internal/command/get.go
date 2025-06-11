@@ -26,6 +26,7 @@ func (c *GetCommand) Name() string {
 func (c *GetCommand) Execute(ctx context.Context, rw protocol.ResponseWriter, args []string) error {
 	// 从rdb文件中查找
 	if len(c.store.Data) == 0 {
+		log.Printf("Get from rdb")
 		kv, err := rdb.GetRDBkeys(c.fn)
 		if err != nil {
 			log.Printf("LS HandleCmd `GET` GetRDBkeys func Wrong: %s", err)
@@ -48,7 +49,7 @@ func (c *GetCommand) Execute(ctx context.Context, rw protocol.ResponseWriter, ar
 		}
 	} else {
 		// 从Map中查找
-		log.Printf("Received GET, getting %s", args[1])
+		log.Printf("Get from Map, Received GET, getting %s", args[1])
 		OP, ok := c.store.Get(args[1])
 		if !ok {
 			log.Printf("ERROR GET: %s", args[1])

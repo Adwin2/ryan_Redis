@@ -15,12 +15,12 @@ import (
 // server/master/master_integration_test.go
 func TestMasterSlaveReplication(t *testing.T) {
 	// 启动主服务器
-	masterCfg := &config.ServerConfig{Port: "6380", Role: "master"}
+	masterCfg := &config.ServerConfig{Dir: "/home/raymond/ryan_Redis/app/internal/server/master/testMaster", Dbfilename: "dump.rdb", Port: "6380", Role: "master"}
 	master := master.NewMasterServer(masterCfg)
 	go master.Start()
 
 	// 启动从服务器
-	slaveCfg := &config.ServerConfig{Port: "6381", Role: "slave", ReplicaOf: config.ReplicaConfig{MasterHost: "localhost", MasterPort: "6380"}}
+	slaveCfg := &config.ServerConfig{Dir: "/home/raymond/ryan_Redis/app/internal/server/master/test_slave", Dbfilename: "dump.rdb", Port: "6381", Role: "slave", ReplicaOf: config.ReplicaConfig{MasterHost: "localhost", MasterPort: "6380"}}
 	slave := slave.NewSlaveServer(slaveCfg)
 	go slave.Start()
 
