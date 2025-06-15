@@ -34,11 +34,7 @@ func (c *PsyncCommand) Execute(ctx context.Context, rw protocol.ResponseWriter, 
 	}
 	// 获取连接
 	conn := rw.Conn()
-	// 添加到副本列表
+	// 添加到副本列表 并发送空RDB文件
 	c.ms.AddReplica(conn)
-	// 发送空RDB文件
-	if err := c.ms.SendRDBFile(conn); err != nil {
-		return err
-	}
 	return nil
 }

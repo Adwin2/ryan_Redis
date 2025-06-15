@@ -63,5 +63,8 @@ func (c *SetCommand) Execute(ctx context.Context, rw protocol.ResponseWriter, ar
 	}
 
 	// 写入OK
-	return rw.WriteSimpleString("OK")
+	if c.master != nil {
+		return rw.WriteSimpleString("OK")
+	}
+	return nil
 }

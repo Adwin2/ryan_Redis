@@ -68,7 +68,7 @@ func SaveToRDB(filename string, store *kvstore.Store) error {
 
 	// 数据库部分
 	var kvCnt, pxCnt byte = 0, 0
-	if len(store.Data) != 0 && len(store.Expires) != 0 {
+	if store != nil && store.Data != nil && store.Expires != nil {
 		kvCnt = byte(len(store.Data))
 		pxCnt = byte(len(store.Expires))
 	}
@@ -83,7 +83,7 @@ func SaveToRDB(filename string, store *kvstore.Store) error {
 		log.Printf("DB Start Error: %s", err)
 		return err
 	}
-	if len(store.Data) != 0 && store != nil {
+	if store != nil && store.Data != nil && store.Expires != nil {
 		// 遍历处理键值对 并写入
 		for key, value := range store.Data {
 			// 检测是否需要编码过期时间戳

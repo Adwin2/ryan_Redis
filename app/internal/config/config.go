@@ -30,10 +30,10 @@ func LoadConfig() (*ServerConfig, error) {
 	// var replicaOf string
 
 	// 设置默认值
-	viper.SetDefault("server.dir", "/var/lib/rdb")
-	viper.SetDefault("server.dbfilename", "dump.rdb")
-	viper.SetDefault("server.port", "6379")
-	viper.SetDefault("server.role", "master")
+	viper.SetDefault("dir", "/var/lib/rdb")
+	viper.SetDefault("dbfilename", "dump.rdb")
+	viper.SetDefault("port", "6379")
+	viper.SetDefault("role", "master")
 	viper.SetDefault("replicaof.master_host", "")
 	viper.SetDefault("replicaof.master_port", "")
 
@@ -71,7 +71,7 @@ func LoadConfig() (*ServerConfig, error) {
 	// 合并命令行参数
 	pflag.String("dir", "", "持久化数据存储目录")
 	pflag.String("dbfilename", "", "数据库文件名")
-	pflag.String("port", "", "绑定端口号")
+	pflag.StringP("port", "p", "", "绑定端口号")
 	pflag.String("role", "", "角色：master/slave")
 	pflag.String("replicaof", "", "配置为该地址的副本: '<MASTER_HOST> <MASTER_PORT>'")
 	// 解析参数
@@ -95,6 +95,7 @@ func LoadConfig() (*ServerConfig, error) {
 	// }
 	if replicaOf := viper.GetString("replicaof"); replicaOf != "" {
 		parts := strings.Fields(replicaOf)
+		log.Printf("replicaof: %s", replicaOf)
 		if len(parts) == 2 {
 			viper.Set("replicaof.master_host", parts[0])
 			viper.Set("replicaof.master_port", parts[1])

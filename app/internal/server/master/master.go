@@ -96,7 +96,6 @@ func (m *MasterServer) HandleConnection(conn net.Conn) {
 			}
 			return
 		}
-
 		// 处理命令
 		if err := m.ProcessCommand(rw, cmd, args); err != nil {
 			log.Printf("Command error: %v, cmd : %s", err, cmd)
@@ -147,15 +146,25 @@ func (m *MasterServer) RemoveReplica(conn net.Conn) {
 }
 
 func (m *MasterServer) syncToReplica(info *replicaInfo) {
+	info.mu.Lock()
+	defer info.mu.Unlock()
 	// 实现数据同步逻辑
-
+	if err := m.SendRDBFile(info.conn); err != nil {
+		log.Printf("Sync to replica Error: %s", err)
+		return
+	}
+	log.Printf("Sync to replica Success: %s", info.addr)
 }
 
 func (m *MasterServer) SendRDBFile(conn net.Conn) error {
+	m.Mu.Lock()
+	defer m.Mu.Unlock()
 	return IoCopyEmpty(m.Cfg.Fn, conn)
 }
 
 func IoCopyEmpty(fn string, conn net.Conn) error {
+	// REWrite by minimal RDB empty file instead ofnerated from SaveToRDB func. ge
+	// minimalRDB :=
 	err := filemanager.SaveToRDB(fn, nil)
 	if err != nil {
 		log.Printf("Save Empty file Error: %s", err)
@@ -221,4 +230,8 @@ func (r *replicaInfo) Write(args []string) error {
 	}
 	_, err := r.conn.Write(protocol.ArrayFmt(args))
 	return err
+}
+
+func (m *MasterServer) GetPoolLen() int {
+	return len(m.Replicas)
 }

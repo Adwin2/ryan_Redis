@@ -9,4 +9,5 @@ type MasterServerInterface interface {
 	RemoveReplica(conn net.Conn)
 	PropagateToReplicas(args []string) error
 	SendRDBFile(conn net.Conn) error
+	GetPoolLen() int
 }

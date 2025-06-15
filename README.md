@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Documentation](https://img.shields.io/badge/docs-configuration-brightgreen)](docs/configuration.md)
 
-一个使用 Go 语言实现的简化版 Redis 服务器，支持基础键值存储和主从复制功能。本项目旨在深入理解 Redis 的核心协议、网络通信模型以及数据持久化机制。
+一个使用 Go 语言实现的简化版 Redis 服务器，支持基础键值存储、主从复制功能以及RDB持久化。本项目旨在深入理解 Redis 的核心协议、网络通信模型以及数据持久化机制。
 
 ## 📋 目录
 
@@ -34,7 +34,7 @@
 - [x] 支持 RESP (REdis Serialization Protocol) 协议
 - [x] 基础数据结构支持：String, List, Hash, Set, Sorted Set
 - [x] 主从复制（Master-Slave Replication）
-- [x] 支持 AOF 持久化
+- [x] 支持 RDB 持久化
 - [ ] 事务支持（开发中）
 - [ ] 集群模式（规划中）
 
@@ -130,6 +130,7 @@ ryan_Redis 提供了灵活的配置方式，支持通过配置文件、环境变
 ### 配置文件
 
 支持 YAML 格式的配置文件，默认查找路径：
+
 - 当前工作目录
 - `./configs/` 目录
 - `/etc/ryan_redis/` 目录
