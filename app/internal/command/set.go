@@ -54,16 +54,12 @@ func (c *SetCommand) Execute(ctx context.Context, rw protocol.ResponseWriter, ar
 		_ = rdb.UpdateRDB(c.fn, c.store)
 	}
 
-	// 如果是主服务器，传播命令到副本
+	// 如果是主服务器，传播命令到副本，并写回OK
 	if c.master != nil {
 		// 传播命令
 		if err := c.master.PropagateToReplicas(args); err != nil {
 			log.Printf("Failed to propagate SET command: %v", err)
 		}
-	}
-
-	// 写入OK
-	if c.master != nil {
 		return rw.WriteSimpleString("OK")
 	}
 	return nil
