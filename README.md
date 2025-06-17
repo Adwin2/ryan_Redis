@@ -37,6 +37,7 @@
 - [x] 支持 RDB 持久化
 - [ ] 事务支持（开发中）
 - [ ] 集群模式（规划中）
+- [ ] API 支持
 
 ### 技术亮点
 
@@ -88,21 +89,21 @@ INFO replication
 ryan_Redis/
     └── app
         ├── cmd  # 项目的命令行工具
-        |    ├── main.go # 主程序入口
-        |    └── server  # 服务端
+             ├── main.go # 主程序入口
+             └── server  # 服务端
         ├── internal  # 项目的核心实现
-        |    ├── command  # 命令处理器
-        |    ├── config  # 配置相关
-        |    ├── protocol  # Redis 协议实现
-        |    ├── replication  # 主从复制相关
-        |    ├── rtest  # 测试帮助函数
-        |    ├── server  # 服务端
-        |    |    ├── master  # 主节点
-        |    |    └── slave  # 从节点
-        |    └── storage  # 存储相关
-        |         ├── memory  # 内存存储
-        |         |    └── kvstore  # KV 存储
-        |         └── rdb  # RDB 存储
+             ├── command  # 命令处理器
+             ├── config  # 配置相关
+             ├── protocol  # Redis 协议实现
+             ├── replication  # 主从复制相关
+             ├── rtest  # 测试帮助函数
+             ├── server  # 服务端
+                  ├── master  # 主节点
+                  └── slave  # 从节点
+             └── storage  # 存储相关
+                 ├── memory  # 内存存储
+                      └── kvstore  # KV 存储
+                 └── rdb  # RDB 存储
         └── pkg  # 公共库
             └── errors_r  # 错误处理
 ```
