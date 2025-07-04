@@ -14,9 +14,6 @@
 - [x] 数据结构支持：String
 - [x] 主从复制（Master-Slave Replication）
 - [x] 支持 RDB 持久化
-- [ ] 事务支持（开发中）
-- [ ] 集群模式（规划中）
-- [ ] API 支持
 
 ### 运行
 
@@ -43,6 +40,8 @@ GET mykey
 # 查看主从复制状态
 INFO replication
 ```
+
+测试示例 见 ./docs/test.md
 
 ### 实现细节
 
