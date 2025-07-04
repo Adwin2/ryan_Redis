@@ -55,35 +55,4 @@ INFO replication
 
 3. 持久化
 RDB 持久化
-
-### 配置说明
-
-ryan_Redis 提供了灵活的配置方式，支持通过配置文件、环境变量和命令行参数进行配置。
-
-### 配置文件
-
-支持 YAML 格式的配置文件，默认查找路径：
-
-- 当前工作目录
-- `./configs/` 目录
-- `/etc/ryan_redis/` 目录
-- `$HOME/.config/ryan_redis/` 目录
-
-### 配置优先级
-
-1. 命令行参数
-2. 环境变量（以 `RR_` 为前缀）
-3. 配置文件
-4. 默认值
-
-## 测试
-
-```bash
-# 运行单元测试
-go test -v ./...
-
-# 运行性能测试
-go test -bench=. -benchmem
-```
-
 本项目采用 MIT 许可证- 详情请参阅 [LICENSE](https://opensource.org/licenses/MIT) 文件。
